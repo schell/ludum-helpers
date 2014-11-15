@@ -60,9 +60,13 @@ executable ludum-helpers
   build-depends:       base >=4.7 && <4.8,
                        gelatin,
                        yarn,
+                       bytestring,
                        mtl,
+                       lens,
                        time,
-                       containers
+                       containers,
+                       GLUtil,
+                       OpenGL
 
   -- Directories containing source files.
   -- hs-source-dirs:
