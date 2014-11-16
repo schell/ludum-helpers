@@ -1,37 +1,79 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Main where
 
-import Gelatin hiding (drawArrays, renderer)
-import Graphics.Rendering.OpenGL hiding (ortho, triangulate, renderer, translate, scale, rotate)
+import Prelude hiding (foldl)
+import Gelatin hiding (drawArrays, get, Pos)
+import Graphics.Rendering.OpenGL hiding (ortho, triangulate, translate, scale, rotate, get)
 import Yarn
 import Shaders
 import Data.IORef
 import Data.Time.Clock
 import Data.Maybe
+import Data.Typeable
+import Data.Foldable
+import Data.Monoid
 import qualified Data.Map.Strict as M
+import qualified Data.IntMap.Strict as IM
 import Control.Lens
 import Control.Monad
-import Control.Monad.Reader
+--import Control.Monad.Reader
+--import Control.Monad.State
 import Control.Concurrent
 import Control.Applicative
+import Control.Eff
+import Control.Eff.Fresh
+import Control.Eff.Lift
+import Control.Eff.State.Strict
 import System.Exit
 
 data Frame = Frame
-type Renderer = Frame -> IO ()
+
+newtype ID = ID { unID :: Int } deriving (Show, Read, Eq, Ord, Typeable, Enum, Num)
+
+data Displayable = CleanFrame
+                 | FullSheet
+                 | Reaper
+                 | Text String
+
+type Renderer = Colors -> Displayable -> RenderSprite
+
+data Colors = Colors { foregroundColor :: V4 Float
+                     , backgroundColor :: V4 Float
+                     } deriving (Typeable)
+newtype Pos = Pos (V2 Float) deriving (Typeable)
+
+data Entities = Entities { positionEnts :: IM.IntMap Pos
+                         , colorsEnts   :: IM.IntMap Colors
+                         , nextEntityID :: ID
+                         }
+
+instance Monoid Entities where
+    mempty = Entities mempty mempty (ID 0)
+    (Entities ps clrs nid) `mappend` (Entities ps' clrs' nid') =
+        Entities (ps `mappend` ps') (clrs `mappend` clrs') (max nid nid')
+
 type RenderSprite = V2 Float -> V2 Float -> Float -> IO ()
+
 data SpriteSheet = SpriteSheet { ssObject :: TextureObject
                                , ssWidth  :: Int
                                , ssHeight :: Int
                                , ssName   :: String
                                }
-type Env = Reader InputEnv
-type Network = Yarn Env () Frame
+
+--type Env = Reader InputEnv
+type Network = Yarn Identity () Frame
+
 data Game = Game { windowRef    :: WindowRef
-                 , renderer     :: Renderer
+                 , draw         :: Renderer
                  , env          :: InputEnv
                  , lastUTCTime  :: UTCTime
                  , network      :: Network
+                 , entities     :: Entities
                  }
 
 loadSpriteSheet :: String -> Int -> Int -> IO SpriteSheet
@@ -59,11 +101,11 @@ newCharRenderer s ss = do
         vals = catMaybes $ map (`M.lookup` cm) keys
         kvs = zip keys vals
 
-    renderers <- forM kvs $ \(c, (v, w, h)) -> do
+    draws <- forM kvs $ \(c, (v, w, h)) -> do
         r <- newSpriteRenderer s ss v w h
         return (c,r)
 
-    let m = M.fromList renderers
+    let m = M.fromList draws
     return $ \c vp vs r -> case M.lookup c m of
                                Nothing -> putStrLn $ c : " has not been loaded."
                                Just f  -> f vp vs r
@@ -110,7 +152,6 @@ newRenderer window = do
 
     drawFullSheet <- newSpriteRenderer s ss (V2 0 0) 304 1184
     drawReaper    <- newSpriteRenderer s ss (V2 135 1070) 42 53
-    drawChar      <- newCharRenderer s ss
     drawText      <- newTextRenderer s ss
 
     clearColor $= toColor4 (black :: V4 Float)
@@ -119,32 +160,51 @@ newRenderer window = do
     blendFuncSeparate $= ((SrcAlpha, OneMinusSrcAlpha), (One, Zero))
 
     currentProgram $= (Just $ program s)
-    updateUniform s $ uniformV4fv "texColor" ([black, white] :: [V4 Float])
-    updateUniform s $ uniformV4fv "replaceColor" ([blue, red] :: [V4 Float])
+    updateUniform s $ uniformV4fv "texColor" ([white, black] :: [V4 Float])
 
-    return $ const $ do
-        currentProgram $= (Just $ program s)
-        clear [ColorBuffer]
-        (w,h) <- getWindowSize window
-        let [w',h'] = map fromIntegral [w,h] :: [Float]
-            [w'',h''] = map ((*2) . fromIntegral) [w,h] :: [GLint]
+    let setColors (Colors fg bg) = updateUniform s $
+                                       uniformV4fv "replaceColor" [fg, bg]
 
-        viewport $= (Position 0 0, Size w'' h'')
-        clear [ColorBuffer]
-        updateUniform s $ uniformi "sampler" (0 :: Int)
-        updateUniform s $ uniformM4f "projection" $ ortho 0 w' 0 h' 0 1
+    return $ \clrs thing pos scl rot -> setColors clrs >> case thing of
+        CleanFrame -> do
+            clear [ColorBuffer]
+            (w,h) <- getWindowSize window
+            let [w',h'] = map fromIntegral [w,h] :: [Float]
+                [w'',h''] = map ((*2) . fromIntegral) [w,h] :: [GLint]
 
-        drawFullSheet (V2 100 100) (V2 1 1) 0
-        drawReaper (V2 10 20) (V2 2 2) (pi/4)
-        drawChar '0' (V2 20 20) (V2 1 1) 0
-        drawText "0123 0123" (V2 23 20) (V2 4 4) 0
+            viewport $= (Position 0 0, Size w'' h'')
+            clear [ColorBuffer]
+            updateUniform s $ uniformi "sampler" (0 :: Int)
+            updateUniform s $ uniformM4f "projection" $ ortho 0 w' 0 h' 0 1
+
+        FullSheet -> drawFullSheet pos scl rot
+        Reaper    -> drawReaper pos scl rot
+        Text str  -> drawText str pos scl rot
 
 newGame :: IO Game
 newGame = do
     wref <- initWindow (V2 300 600) (V2 600 600) "ludum-helpers"
     t    <- getCurrentTime
     r    <- readIORef wref >>= newRenderer . snd
-    return $ Game wref r emptyInputEnv t $ pure Frame
+    return $ Game wref r emptyInputEnv t (pure Frame) mempty
+
+displayAll :: ( SetMember Lift (Lift IO)          r
+              , Member    (State (IM.IntMap Colors)) r
+              , Member    (State (IM.IntMap Pos)) r
+              ) => Renderer -> Eff r ()
+displayAll draw = do
+    let display _ clrs (Pos pos) = draw clrs Reaper pos (V2 1 1) 0
+    fMap <- IM.intersectionWithKey display <$> get <*> get
+    lift $ sequenceA_ fMap
+
+--runEntities :: (Typeable m, Monad m)
+--            => Eff (Fresh ID :> (State (IM.IntMap Colors) :> (State (IM.IntMap Pos) :> (Lift m :> ())))) w
+--            -> Entities -> m w
+runEntities eff Entities{..} = do
+    entities' <- runLift $ runState positionEnts $ runState colorsEnts $
+                     runFresh eff nextEntityID
+    return entities
+
 
 loop :: Game -> IO ()
 loop game = do
@@ -153,7 +213,8 @@ loop game = do
     makeContextCurrent $ Just window
 
     -- Do our rendering
-    renderer gameFrame
+    draw (Colors transparent transparent) CleanFrame zero zero 0
+    draw (Colors green transparent) Reaper (V2 0 0) (V2 1 1) 0
 
     -- Handle quitting
     swapBuffers window
@@ -172,12 +233,15 @@ stepGame g@Game{..} = do
     -- Pull the game data down out of the network
     t <- getCurrentTime
     let dt = realToFrac $ diffUTCTime t lastUTCTime
-        Output gameFrame network' = runReader (stepYarn network dt ()) env'
+        Identity (Output gameFrame network') = stepYarn network dt ()
+
+    -- Run our entities
+--    entities' <- runEntities $ return ()
 
     return (gameFrame, g{ env = clearEvents env'
-                       , lastUTCTime = t
-                       , network = network'
-                       })
+                        , lastUTCTime = t
+                        , network = network'
+                        })
 
 main :: IO ()
 main = do

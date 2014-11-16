@@ -66,7 +66,8 @@ executable ludum-helpers
                        time,
                        containers,
                        GLUtil,
-                       OpenGL
+                       OpenGL,
+                       extensible-effects
 
   -- Directories containing source files.
   -- hs-source-dirs:
