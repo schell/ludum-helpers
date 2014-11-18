@@ -6,7 +6,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Rendering where
 
-import Prelude hiding (foldl, mapM_, sequence_)
+import Prelude
 import Gelatin hiding (drawArrays, get, Position)
 import Graphics.Rendering.OpenGL hiding (ortho, triangulate, translate, scale, rotate, get, Position)
 import qualified Graphics.Rendering.OpenGL as GL
@@ -17,6 +17,7 @@ import qualified Data.Map.Strict as M
 import Control.Lens
 import Control.Monad hiding (mapM_, sequence_)
 import Control.Applicative
+import Debug.Trace
 
 data Displayable = CleanFrame
                  | FullSheet
@@ -51,13 +52,13 @@ loadSpriteSheet fp w h = do
 
 -- A map of chars to their bitmap position and size in our spritesheet.
 charMetrics :: M.Map Char (V2 Int, Int, Int)
-charMetrics =
-    M.fromList [ (' ', (V2 0 0, 7, 7))
-               , ('0', (V2 1  1079, 6,7))
-               , ('1', (V2 6  1079, 4,7))
-               , ('2', (V2 9  1079, 6,7))
-               , ('3', (V2 14 1079, 6,7))
-               ]
+charMetrics = M.fromList $ concat $ zipWith mk [row1,row2,row3] [V2 9 1130, V2 9 1138, V2 9 1146]
+    where row1    = [' ' .. '@']
+          row2    = ['A' .. '`']
+          row3    = ['a' .. '~']
+          mk :: String -> V2 Int -> [(Char, (V2 Int, Int, Int))]
+          mk row p = zip row $ zip3 (length row `pointsFrom` p) (cycle [5]) (cycle [7])
+          pointsFrom n p = zipWith (\n' p' -> p' ^+^ V2 (n'*6) 0) [0 .. n] $ cycle [p]
 
 newCharRenderer :: ShaderProgram -> SpriteSheet -> IO (Char -> RenderSprite)
 newCharRenderer s ss = do
@@ -78,14 +79,17 @@ newCharRenderer s ss = do
 newTextRenderer :: ShaderProgram -> SpriteSheet -> IO (String -> RenderSprite)
 newTextRenderer s ss = do
     cr <- newCharRenderer s ss
-    let cm = charMetrics
-        f [] _ _ _ = return ()
-        f (c:str) vp vs r = case M.lookup c cm of
-                                Nothing -> f (' ':str) vp vs r
-                                Just (V2 _ _, w, _) -> do cr c vp vs r
-                                                          f str (vp + vs * V2 (fromIntegral w) 0) vs r
+    return $ renderText cr
 
-    return f
+renderText :: (Char -> RenderSprite) -> String -> RenderSprite
+renderText render str pos scl rot = renderText' str pos
+    where renderText' []       _    = return ()
+          renderText' ('\n':str') _ = renderText render str' (pos + scl * V2 0 7) scl rot
+          renderText' (c:str') pos' =
+              case M.lookup c charMetrics of
+                  Nothing             -> renderText' (' ':str') pos'
+                  Just (V2 _ _, w, _) -> do render c pos' scl rot
+                                            renderText' str' (pos' + scl * V2 (fromIntegral w) 0)
 
 newSpriteRenderer :: ShaderProgram -> SpriteSheet -> V2 Int -> Int -> Int -> IO RenderSprite
 newSpriteRenderer s ss p w h = do

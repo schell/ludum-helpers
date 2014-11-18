@@ -32,7 +32,10 @@ initialize = do
 
     pinky `addProperty` (V2 100 10 :: Position)
     pinky `addProperty` Colors pink transparent
-    pinky `addProperty` Name "00000011111222222"
+    pinky `addProperty` Name (concat [row1, "\n", row2, "\n", row3])
+        where row1 = [' ' .. '@']
+              row2 = ['A' .. '`']
+              row3 = ['a' .. '~']
 
 play :: ( SetMember Lift (Lift IO)               r
         , Member (Fresh ID)                      r

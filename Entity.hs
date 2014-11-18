@@ -97,9 +97,7 @@ displayAll = do
     renderer <- ask
 
     let displayToon (clrs, pos) = (drawWith renderer) clrs Reaper pos (V2 1 1) 0
-        displayName (Name n, (clrs, pos)) = do
-            print n
-            (drawWith renderer) clrs (Text n) pos (V2 2 2) 0
+        displayName (Name n, (clrs, pos)) = (drawWith renderer) clrs (Text n) pos (V2 2 2) 0
         toons = IM.intersectionWith (,) clrMap posMap
         namesOfToons = IM.intersectionWith (,) names toons
     lift $ do makeContextCurrent $ Just window
