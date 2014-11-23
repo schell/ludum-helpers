@@ -17,12 +17,18 @@ import qualified Data.Map.Strict as M
 import Control.Lens
 import Control.Monad hiding (mapM_, sequence_)
 import Control.Applicative
-import Debug.Trace
+
+data Direction = North
+               | East
+               | South
+               | West
+               deriving (Eq, Show, Typeable)
 
 data Displayable = CleanFrame
                  | FullSheet
-                 | Reaper
+                 | Reaper Direction
                  | Text String
+                 deriving (Typeable)
 
 type RenderFunc = Colors -> Displayable -> RenderSprite
 newtype Renderer = Renderer RenderFunc deriving (Typeable)
@@ -112,6 +118,19 @@ newSpriteRenderer s ss p w h = do
         updateUniform s $ uniformM4f "modelview" (mv :: M44 Float)
         drawArrays TriangleFan 0 4
 
+newReaperRenderer :: ShaderProgram -> SpriteSheet -> IO (Direction -> RenderSprite)
+newReaperRenderer s ss = do
+    south <- newSpriteRenderer s ss (V2 0 1077) 40 51
+    east  <- newSpriteRenderer s ss (V2 42 1077) 40 51
+    west  <- newSpriteRenderer s ss (V2 83 1077) 40 51
+    north <- newSpriteRenderer s ss (V2 125 1077) 40 51
+
+    return $ \d pos scl rot -> case d of
+                                   South -> south pos scl rot
+                                   East  -> east pos scl rot
+                                   West  -> west pos scl rot
+                                   North -> north pos scl rot
+
 newRenderer :: Window -> IO Renderer
 newRenderer window = do
     --s  <- simple2dTextureShader
@@ -119,7 +138,7 @@ newRenderer window = do
     ss <- loadSpriteSheet "img/oryx_roguelike_16x24.png" 304 1184
 
     drawFullSheet <- newSpriteRenderer s ss (V2 0 0) 304 1184
-    drawReaper    <- newSpriteRenderer s ss (V2 135 1070) 42 53
+    drawReaper    <- newReaperRenderer s ss
     drawText      <- newTextRenderer s ss
 
     currentProgram $= (Just $ program s)
@@ -146,5 +165,5 @@ newRenderer window = do
                 updateUniform s $ uniformM4f "projection" $ ortho 0 w' 0 h' 0 1
 
             FullSheet -> drawFullSheet pos scl rot
-            Reaper    -> drawReaper pos scl rot
+            Reaper d  -> drawReaper d pos scl rot
             Text str  -> drawText str pos scl rot
