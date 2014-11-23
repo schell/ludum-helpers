@@ -37,6 +37,7 @@ initialize :: ( Member (Fresh ID) r
               , Member (Entity Position) r
               , Member (Entity Name) r
               , Member (Entity (Varying (R.Reader InputEnv) Position)) r
+              , Member (Entity (Varying (R.Reader InputEnv) Velocity)) r
               )
            => Eff r ()
 initialize = do
@@ -53,6 +54,7 @@ initialize = do
 
     pinky `addProperty` (Reaper East)
     pinky `addProperty` (Position $ V2 100 10)
+    pinky `addProperty` playerKeyVelocities
     pinky `addProperty` Colors pink transparent
     pinky `addProperty` Name (concat [row1, "\n", row2, "\n", row3])
         where row1 = [' ' .. '@']
@@ -65,6 +67,7 @@ play :: ( Member (Fresh ID) r
         , Member (Entity Position) r
         , Member (Entity Name) r
         , Member (Entity (Varying (R.Reader InputEnv) Position)) r
+        , Member (Entity (Varying (R.Reader InputEnv) Velocity)) r
         , Member (Reader WindowRef) r
         , Member (Reader Renderer) r
         , Member (State UTCTime) r
@@ -82,7 +85,7 @@ play = do
     -- Get the user events and fold them into our InputEnv.
     loadNewEvents
 
-    --- Progress varyings
+    --- Progress varying position
     (input :: InputEnv) <- get
     (pvars :: Component (Varying (R.Reader InputEnv) Position)) <- get
 
@@ -90,19 +93,28 @@ play = do
         pouts   = pread <$> pvars
         pvals   = outVal  <$> pouts
         pvars'  = outYarn <$> pouts
+
     ---- Update varying positions
     put pvars'
-    ---- Update static positions
-    modify (pvals `IM.union`)
+    -- Update static positions
+    modify $ IM.union pvals
 
-    --pos    <- get
-    --let peffects = (flip runReader input) <$> pvars
-    --let vsteps = (\y -> R.runReader (stepYarn y dt ()) input) <$> vvars
-    --    vels   = outVal <$> vsteps
-    --    vvars' = outYarn <$> vsteps
-    --    pos'   = IM.intersectionWith incrementPosition vels pos
-    --put vvars'
-    --modify (pos' `IM.union`)
+    -- Progress varying velocity
+    pos <- get
+    (vvars :: Component (Varying (R.Reader InputEnv) Velocity)) <- get
+
+    let vread y = R.runReader (stepYarn y dt ()) input
+        vouts   = vread <$> vvars
+        vvals   = outVal  <$> vouts
+        vvars'  = outYarn <$> vouts
+        pos'    = IM.intersectionWith incrementPosition vvals pos
+
+    lift $ print pos'
+    ---- Update varying positions
+    put vvars'
+
+    ---- Update static positions
+    modify $ IM.union pos'
 
     -- Display our game
     displayAll
@@ -112,7 +124,6 @@ play = do
     handleQuit
     -- Pass some time so we don't hog all the CPU cycles.
     lift $ threadDelay 100
-    return ()
 
 main :: IO ()
 main = do

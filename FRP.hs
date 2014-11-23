@@ -17,8 +17,8 @@ import Data.Traversable
 --------------------------------------------------------------------------------
 playerKeyVelocities :: Yarn (Reader InputEnv) () Velocity
 playerKeyVelocities = Velocity . sum . map unvelocity <$> sequenceA kvs
-    where kvs = [ pure (Key'J, Velocity $ V2 0 (-5)) ~> keyedVelocity
-                , pure (Key'K, Velocity $ V2 0 5) ~> keyedVelocity
+    where kvs = [ pure (Key'K, Velocity $ V2 0 (-5)) ~> keyedVelocity
+                , pure (Key'J, Velocity $ V2 0 5) ~> keyedVelocity
                 , pure (Key'L, Velocity $ V2 5 0) ~> keyedVelocity
                 , pure (Key'H, Velocity $ V2 (-5) 0) ~> keyedVelocity
                 ]

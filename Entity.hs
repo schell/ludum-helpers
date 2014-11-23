@@ -136,9 +136,9 @@ loadNewEvents :: ( SetMember Lift (Lift IO)     r
 loadNewEvents = do
     lift $ pollEvents
     events <- ask >>= lift . getNewEvents
-    lift $ print events
     env    <- get
     let env' = foldl foldInput env events
+    lift $ print $ ienvKeysDown env'
     put env'
 
 clearLastEvents :: ( SetMember Lift (Lift IO)     r
