@@ -3,30 +3,52 @@
 {-# LANGUAGE Arrows #-}
 module FRP where
 
-import Entity
 import Yarn
-import Gelatin hiding (getKey, get)
+import Types
+import UserInput
+import Linear
+import Gelatin (InputEvent(..),InputEnv(..),Key(..))
 import Control.Monad.Reader
 import Control.Applicative
 import Control.Arrow
+import Data.Maybe
 import Data.Set hiding (map)
 import Data.Traversable
 
 --------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
+addVelocity :: Position -> Velocity -> Position
+addVelocity p v = p ^+^ v
+--------------------------------------------------------------------------------
 -- Player character control signals
 --------------------------------------------------------------------------------
-playerKeyVelocities :: Yarn (Reader InputEnv) () Velocity
-playerKeyVelocities = Velocity . sum . map unvelocity <$> sequenceA kvs
-    where kvs = [ pure (Key'K, Velocity $ V2 0 (-5)) ~> keyedVelocity
-                , pure (Key'J, Velocity $ V2 0 5) ~> keyedVelocity
-                , pure (Key'L, Velocity $ V2 5 0) ~> keyedVelocity
-                , pure (Key'H, Velocity $ V2 (-5) 0) ~> keyedVelocity
+
+keyboardVelocity :: Yarn (Reader InputEnv) a Velocity
+keyboardVelocity = proc _ -> do
+    uc <- keyboardControl -< ()
+    let toV Left'  = V2 (-1) 0
+        toV Right' = V2 1    0
+        toV Up     = V2 0    (-1)
+        toV Down   = V2 0    1
+        toV None   = zero
+    returnA -< (5 *^) $ sum $ map toV $ userDirections uc
+
+keyboardControl :: Yarn (Reader InputEnv) a UserControl
+keyboardControl = UserControl <$> keyboardDirections
+
+keyboardDirections :: Yarn (Reader InputEnv) a [Direction]
+keyboardDirections = catMaybes <$> sequenceA kvs
+    where kvs = [ pure (Key'W, Up)     ~> whenKeyed
+                , pure (Key'A, Left')  ~> whenKeyed
+                , pure (Key'S, Down)   ~> whenKeyed
+                , pure (Key'D, Right') ~> whenKeyed
                 ]
 
-keyedVelocity :: Yarn (Reader InputEnv) (Key, Velocity) Velocity
-keyedVelocity = proc (k,v) -> do
+whenKeyed :: Yarn (Reader InputEnv) (Key, a) (Maybe a)
+whenKeyed = proc (k,a) -> do
     down <- keyIsDown -< k
-    returnA -< if down then v else Velocity zero
+    returnA -< if down then Just a else Nothing
 --------------------------------------------------------------------------------
 -- General input signals
 --------------------------------------------------------------------------------

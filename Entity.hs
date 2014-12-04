@@ -9,8 +9,9 @@ module Entity where
 
 import Prelude hiding (foldl, mapM_, sequence_)
 import Gelatin hiding (drawArrays, get, Position, renderer, varying, Name)
---import Linear
 import Yarn
+import Types
+import Toons
 import Rendering
 import Data.Time.Clock
 import Data.Typeable
@@ -31,6 +32,7 @@ deriving instance Typeable Identity
 --------------------------------------------------------------------------------
 newtype ID = ID { unID :: Int } deriving (Show, Read, Eq, Ord, Typeable, Enum, Num)
 type Component a = IM.IntMap a
+type VaryingComponent m a = Component (Varying m a)
 type Entity a = State (Component a)
 type CanRead a r = Member (Reader a) r
 type CanModify a r = Member (State a) r
@@ -42,22 +44,12 @@ type Varying m a = Yarn m () a
 --type InputVarying a = Yarn (Reader InputEnv) () a
 --type IOVarying a = Yarn IO () a
 --------------------------------------------------------------------------------
--- Components (not a complete list)
---------------------------------------------------------------------------------
-newtype Position = Position (V2 Float) deriving (Show, Typeable)
-newtype Velocity = Velocity (V2 Float) deriving (Show, Typeable)
-newtype Name = Name String deriving (Show, Typeable)
---------------------------------------------------------------------------------
 -- Context helpers
 --------------------------------------------------------------------------------
-unvelocity :: Velocity -> V2 Float
-unvelocity (Velocity v) = v
 
-unposition :: Position -> V2 Float
-unposition (Position p) = p
 
 incrementPosition :: Velocity -> Position -> Position
-incrementPosition (Velocity v) (Position p) = Position $ v ^+^ p
+incrementPosition (v) (p) = v ^+^ p
 --------------------------------------------------------------------------------
 -- Progressing Components
 --------------------------------------------------------------------------------
@@ -114,13 +106,12 @@ displayAll = do
     (clrMap :: Component Colors)  <- get
     (posMap :: Component Position) <- get
     (faceMap :: Component Displayable) <- get
-    (names :: Component Name)   <- get
     window   <- ask >>= lift . getWindow
     renderer <- ask
 
     let
         display :: Colors -> Displayable -> Position -> IO ()
-        display clrs face (Position pos) = (drawWith renderer) clrs face pos (V2 1 1) 0
+        display clrs face pos = (drawWith renderer) clrs face pos (V2 1 1) 0
 
     lift $ do makeContextCurrent $ Just window
               (drawWith renderer) (Colors transparent transparent) CleanFrame zero zero 0
@@ -137,9 +128,11 @@ loadNewEvents = do
     lift $ pollEvents
     events <- ask >>= lift . getNewEvents
     env    <- get
-    let env' = foldl foldInput env events
-    lift $ print $ ienvKeysDown env'
+    let env'  = foldl foldInput env events
     put env'
+
+--addJoystickInput :: InputEnv -> JoystickInput -> InputEnv
+--addJoystickInput i j =
 
 clearLastEvents :: ( SetMember Lift (Lift IO)     r
                    , Member    (State InputEnv)   r)

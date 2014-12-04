@@ -6,7 +6,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 module Rendering where
 
-import Prelude
+import Toons
 import Gelatin hiding (drawArrays, get, Position)
 import Graphics.Rendering.OpenGL hiding (ortho, triangulate, translate, scale, rotate, get, Position)
 import qualified Graphics.Rendering.OpenGL as GL
@@ -17,18 +17,6 @@ import qualified Data.Map.Strict as M
 import Control.Lens
 import Control.Monad hiding (mapM_, sequence_)
 import Control.Applicative
-
-data Direction = North
-               | East
-               | South
-               | West
-               deriving (Eq, Show, Typeable)
-
-data Displayable = CleanFrame
-                 | FullSheet
-                 | Reaper Direction
-                 | Text String
-                 deriving (Typeable)
 
 type RenderFunc = Colors -> Displayable -> RenderSprite
 newtype Renderer = Renderer RenderFunc deriving (Typeable)
@@ -118,7 +106,7 @@ newSpriteRenderer s ss p w h = do
         updateUniform s $ uniformM4f "modelview" (mv :: M44 Float)
         drawArrays TriangleFan 0 4
 
-newReaperRenderer :: ShaderProgram -> SpriteSheet -> IO (Direction -> RenderSprite)
+newReaperRenderer :: ShaderProgram -> SpriteSheet -> IO (CardinalDirection -> RenderSprite)
 newReaperRenderer s ss = do
     south <- newSpriteRenderer s ss (V2 0 1077) 40 51
     east  <- newSpriteRenderer s ss (V2 42 1077) 40 51

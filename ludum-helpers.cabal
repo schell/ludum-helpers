@@ -67,6 +67,7 @@ executable ludum-helpers
                        time,
                        containers,
                        GLUtil,
+                       GLFW-b,
                        OpenGL,
                        extensible-effects
 
