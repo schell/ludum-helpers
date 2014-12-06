@@ -11,17 +11,21 @@ module Main where
 
 import Prelude hiding (sequence_, minimum)
 import Gelatin hiding (drawArrays, get, Position, renderer, Name)
+import Yarn
 import Types
 import Toons
 import UserInput
 import Rendering
+import Collision
 import Data.Time.Clock
 import Data.Typeable
 import Data.Monoid
 import Data.Foldable
+import Data.List (sortBy)
 import qualified Data.Set as S
 import qualified Data.IntMap as IM
 import qualified Control.Monad.Reader as R
+import Control.Lens
 import Control.Concurrent
 import Control.Eff
 import Control.Eff.Fresh
@@ -32,44 +36,45 @@ import Control.Applicative
 import System.Exit
 
 deriving instance Typeable (R.ReaderT)
-data Entanglement = ProjectsOntoAxis ID
-                  | CanCollideWith ID
-                  deriving Typeable
-
+deriving instance Typeable Identity
 
 initialize = do
-    axis <- fresh
-    axis `addProperty` (Box 1000 1)
-    axis `addProperty` Colors transparent white
-    axis `addProperty` (0 :: Rotation)
-    axis `addProperty` (V2 300 300 :: Position)
-    axis `addProperty` (playerRotation bumperRotationMap)
+    let blockPos = V2 150 150 :: Position
+    block <- fresh
+    block `addProperty` (Box 20 20)
+    block `addProperty` (Colors transparent green)
+    block `addProperty` (PhysicalBody (AABB blockPos 20 20) $ Kilos 50)
+    block `addProperty` (0 :: Rotation)
 
-    reaper <- fresh
-    reaper `addProperty` (Reaper South)
-    reaper `addProperty` (V2 100 100 :: Position)
-    reaper `addProperty` (0 :: Rotation)
-    reaper `addProperty` Colors green transparent
-    reaper `addProperty` (playerDirection wasdDirectionMap)
-    reaper `addProperty` (AABB 0 50 50)
+    let playerPos = (V2 150 200)
+        hovering  = V2 <$> 0 <*> (updown :: Yarn Identity () Float)
+        updown    = linear 0 (-5) (1 :: Float) `andThen`
+                      linear (-5) 0 (1 :: Float) `andThen` updown
+    player <- fresh
+    player `addProperty` (Reaper East)
+    player `addProperty` (0 :: Rotation)
+    player `addProperty` Colors pink transparent
+    player `addProperty` (PhysicalBody (AABB playerPos 5 14) $ Kilos 10)
+    player `addProperty` playerPos
+    player `addProperty` (playerDirection 150 dpadDirectionMap)
+    player `addProperty` (playerDirection 150 wasdDirectionMap)
+    player `addProperty` hovering
+    put $ Player player -- Setting our player as the player id
 
-    pinky <- fresh
-    pinky `addProperty` (Reaper East)
-    pinky `addProperty` (V2 0 0 :: Position)
-    pinky `addProperty` (0 :: Rotation)
-    pinky `addProperty` Colors pink transparent
-    pinky `addProperty` (playerDirection dpadDirectionMap)
-    pinky `addProperty` (AABB 0 50 50)
-    pinky `addProperty` (CanCollideWith reaper)
-
-
-    -- How to entangle two entities so they can interact with each other in
-    -- a special way? Maybe I'd have to enumerate all possible interactions
-    -- using a type and then in `play` I could map the type to a function
-    -- to perform.
+-- Progress the signals
+stepVaryingComponent dt mf = do
+    vars <- get
+    let runM y = mf $ stepYarn y dt ()
+        outs   = runM <$> vars
+        vals   = outVal  <$> outs
+        vars'  = outYarn <$> outs
+    -- Update the signals
+    put vars'
+    -- Return the static values
+    return vals
 
 -- Find entities that have keyboard control and progress their positions.
-stepKeyboardControlledPositions dt = do
+stepKeyboardControlledThings dt = do
     (input :: InputEnv) <- get
     (positions :: Component Position) <- get
     (controls :: Component (PlayerDirection Key)) <- get
@@ -84,7 +89,7 @@ stepJoystickControlledThings dt = do
         buttonSet = case mJInput of
                         Nothing -> S.empty
                         Just ji -> Prelude.foldl f S.empty $ zip (jiButtons ji) [0..]
-    lift $ print buttonSet
+    --lift $ print buttonSet
     (positions :: Component Position) <- get
     (poscontrols :: Component (PlayerDirection Int)) <- get
 
@@ -100,6 +105,28 @@ stepJoystickControlledThings dt = do
     modify $ IM.union positions'
     modify $ IM.union rotations'
 
+-- Update physical bodies with positions.
+updatePhysicalBodyPositions = do
+    oldPositions <- get
+    oldBodies <- get
+    let newBodies = IM.intersectionWith (\p b -> b & pbAABBLens.aabbPositionLens .~ p)
+                                        oldPositions
+                                        oldBodies
+    modify $ IM.union newBodies
+
+-- Collide player with the environment.
+collidePlayer = do
+    (Player (ID player)) <- get
+    (bodies :: Component PhysicalBody) <- get
+    let mupdate  = do pbody <- IM.lookup player bodies
+                      let bodies' = foldCollision (player, pbody) $
+                                      IM.toList bodies
+
+                      return $ put $ IM.fromList bodies'
+    case mupdate of
+        Nothing -> return ()
+        Just f  -> f
+
 play = do
     -- Tick time.
     t' <- lift $ getCurrentTime
@@ -110,28 +137,42 @@ play = do
     -- Get the user events and fold them into our InputEnv.
     loadNewEvents
 
-    stepKeyboardControlledPositions dt
+    -- Get the player position from last frame.
+    Player (ID player) <- get
+    mlastPlayerPos <- IM.lookup player <$> get
+
+    stepKeyboardControlledThings dt
     stepJoystickControlledThings dt
+    -- Get the player position after user input.
 
-    -- Find things that have an aabb and a position. Update the aabb's
-    -- position.
-    positions <- get
-    aabbs     <- get
-    let aabbs' = IM.intersectionWith (\p (AABB _ w h) -> AABB p w h)
-                                     positions
-                                     aabbs
-    modify $ IM.union aabbs'
+    -- Update the player's toon based on velocity
+    mnewPlayerPos <- IM.lookup player <$> get
+    mPlayerToon   <- IM.lookup player <$> get
+    let mv = do lastPlayerPos <- mlastPlayerPos
+                newPlayerPos  <- mnewPlayerPos
+                playerToon    <- mPlayerToon
+                let v = newPlayerPos - lastPlayerPos
+                    toon = displayPlusVelocity playerToon v
+                if v == zero then Nothing
+                  else return $ do (ds :: Component Displayable) <- get
+                                   put $ IM.insert player toon ds
+                                   lift $ print (playerToon, toon)
+    maybe (return ()) id mv
 
-    -- Use our velocities to set some displayables
-    vvals <- get
-    displayables <- get
-    let displayables' = IM.intersectionWith displayPlusVelocity displayables vvals
-    modify $ IM.union displayables'
+    updatePhysicalBodyPositions
+    collidePlayer
+
+    -- Update positions with new physical bodies.
+    (positions :: Component Position) <- get
+    bodies <- get
+    let newPositions = IM.intersectionWith (const (^. pbAABBLens.aabbPositionLens))
+                                           positions
+                                           bodies
+    -- Update old positions with new physical bodies
+    modify $ IM.union newPositions
 
     -- Display our game
-    displayAll
-
-
+    displayAll dt
 
     -- Clear out the list of events that happened this frame.
     clearLastEvents
@@ -139,70 +180,6 @@ play = do
     handleQuit
     -- Pass some time so we don't hog all the CPU cycles.
     lift $ threadDelay 100
-
-aabbAxes :: [SeparatingAxis]
-aabbAxes =
-    [ V2 1    0
-    , V2 0    1
-    ]
-
-aabbLines :: AABB -> [Line]
-aabbLines a = [(tl, tr), (tr, br), (br, bl), (bl, tl)]
-    where [tl,tr,bl,br] = aabbPoints a
-
-aabbPoints :: AABB -> [V2 Float]
-aabbPoints (AABB (V2 x y) hw hh) = [V2 l t, V2 r t, V2 l b, V2 r b]
-    where (l,t,r,b) = (x - hw, y - hh, x + hw, y + hh)
-
-aabbProjectionRange :: AABB -> V2 Float -> (Float, Float)
-aabbProjectionRange aabb axis = range
-    where range = Prelude.foldl (\(n,x) p' -> (min n p', max x p'))
-                                (1/0, -(1/0))
-                                prjs
-          ps    = aabbPoints aabb
-          prjs  = map (`dot` axis) ps
-
-collidesWithRange :: (Float, Float) -> (Float, Float) -> Bool
-collidesWithRange (a,b) (c,d) = not (d <= a || b <= c)
-
-collideOnAxis :: AABB -> AABB -> V2 Float -> Maybe (V2 Float)
-collideOnAxis a b axis = if col then Just $ u ^* v else Nothing
-    where rA@(n1, n2) = aabbProjectionRange a axis
-          rB@(m1, m2) = aabbProjectionRange b axis
-          v = min (m2 - n1) (n2 - m1)
-          u = signorm axis
-          col = collidesWithRange rA rB
-
-collidedInto :: AABB -> AABB -> Maybe (V2 Float)
-collidedInto a b = (minimumBy dv) <$> (sequence axisOverlaps)
-    where axisOverlaps = map (collideOnAxis a b) aabbAxes
-          dv v1 v2 = compare (norm v1) (norm v2)
-
-runEntanglement thing (ProjectsOntoAxis (ID axis)) = do
-    rotations <- get
-    aabbs     <- get
-    renderer  <- ask
-
-    return $ maybe (return ()) id $ do
-        (theta :: Rotation) <- IM.lookup axis rotations
-        aabb@(AABB p _ _) <- IM.lookup thing aabbs
-        let vaxis   = V2 (cos theta) (sin theta)
-            (mn,mx) = aabbProjectionRange aabb vaxis
-
-        return $ (drawWith renderer) (Colors transparent white)
-                                     (Box (mx - mn) 1)
-                                     p
-                                     (V2 1 1)
-                                     theta
-runEntanglement a (CanCollideWith (ID b)) = do
-    aabbs <- get
-    return $ maybe (return ()) id $ do
-        aabba <- IM.lookup a aabbs
-        aabbb <- IM.lookup b aabbs
-        return $ putStrLn $ unwords [show a, "collided into", show b, "is"
-                                    , show $ aabba `collidedInto` aabbb
-                                    ]
-
 
 --------------------------------------------------------------------------------
 -- Entities
@@ -219,12 +196,16 @@ intersectionWith4 :: (a -> b -> c -> d -> e)
                   -> Component e
 intersectionWith4 f a b c d = IM.intersectionWith ($) (intersectionWith3 f a b c) d
 
-displayAll = do
-    (colors     :: Component Colors)      <- get
-    (positions  :: Component Position)    <- get
-    (rotations  :: Component Rotation)    <- get
-    (faces      :: Component Displayable) <- get
-    (aabbs      :: Component AABB) <- get
+displayAll dt = do
+    (colors     :: Component Colors)       <- get
+    (positions  :: Component Position)     <- get
+    (rotations  :: Component Rotation)     <- get
+    (faces      :: Component Displayable)  <- get
+    (bodies     :: Component PhysicalBody) <- get
+    (offsets    :: Component PositionOffset) <- stepVaryingComponent dt runIdentity
+
+    let bodyPositions = fmap (aabbPosition . pbAABB) bodies
+        positions' = IM.unionWith (^+^) offsets $ IM.union bodyPositions positions
 
     window   <- ask >>= lift . getWindow
     renderer <- ask
@@ -233,17 +214,20 @@ displayAll = do
         display clrs face pos rot = (drawWith renderer) clrs face pos (V2 1 1) rot
 
     -- Run our entanglements?
-    entanglements <- get >>= \ets -> R.forM (IM.toList ets) $ uncurry runEntanglement
+    --entanglements <- get >>= \ets -> R.forM (IM.toList ets) $ uncurry runEntanglement
 
     lift $ do makeContextCurrent $ Just window
               (drawWith renderer) (Colors transparent transparent) CleanFrame zero zero 0
-              -- Display aabbs for testing.
-              forM_ (IM.elems aabbs) $ \(AABB p hw hh) -> do
-                  let (w,h) = (2*hw, 2*hh)
-                  (drawWith renderer) (Colors transparent $ red `alpha` 0.5) (Box w h) p (V2 1 1) 0
               -- Display all toons.
-              sequence_ $ intersectionWith4 display colors faces positions rotations
-              sequence_ entanglements
+              let draws = IM.elems $ intersectionWith4 (,,,) colors faces positions' rotations
+                  draws' = sortBy (\(_,_,p1,_) (_,_,p2,_) -> compare (p1^._y) (p2^._y)) draws
+                  drawIOs = fmap (\(a,b,c,d) -> display a b c d) draws'
+              sequence_ drawIOs
+              --sequence_ entanglements
+              let clrs = Colors transparent $ red `alpha` 0.2
+              sequence_ $ fmap (\(PhysicalBody (AABB p hw hh) _) -> display clrs (Box hw hh) p 0)
+                               bodies
+
               --mapM_ displayName namesOfToons
               swapBuffers window
 
@@ -264,7 +248,7 @@ handleQuit = ask >>= lift . getWindow >>= \window -> lift $ do
 
 main :: IO ()
 main = do
-    wref     <- initWindow (V2 300 600) (V2 600 600) "ludum-helpers"
+    wref     <- initWindow (V2 300 600) (V2 300 300) "ld31"
     renderer <- newRenderer =<< getWindow wref
     t        <- getCurrentTime
 
@@ -275,11 +259,13 @@ main = do
             $ evalState (mempty :: Component Velocity)
             $ evalState (mempty :: Component Colors)
             $ evalState (mempty :: Component Name)
-            $ evalState (mempty :: Component AABB)
+            $ evalState (mempty :: Component PhysicalBody)
             $ evalState (mempty :: Component (PlayerDirection Key))
             $ evalState (mempty :: Component (PlayerDirection Int))
             $ evalState (mempty :: Component (PlayerRotation Int))
-            $ evalState (mempty :: Component Entanglement)
+            -- $ evalState (mempty :: Component Entanglement)
+            $ evalState (mempty :: VaryingComponent Identity PositionOffset)
+            $ evalState (Player $ ID 0)
             $ evalState emptyInputEnv
             $ evalState t
             $ flip runReader wref

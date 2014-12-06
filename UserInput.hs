@@ -37,9 +37,9 @@ bumperRotationMap =
     , (5, 1)
     ]
 
-playerDirection :: Eq a => DirectionMap a -> PlayerDirection a
-playerDirection keyMap keys t = t *^ v
-    where v = (100 *^) $ sum $ map toV directions
+playerDirection :: Eq a => Float -> DirectionMap a -> PlayerDirection a
+playerDirection speed keyMap keys t = t *^ v
+    where v = (speed *^) $ sum $ map toV directions
           directions = catMaybes $ S.toList $ S.map (`lookup` keyMap) keys
           toV Left'  = V2 (-1) 0
           toV Right' = V2 1    0

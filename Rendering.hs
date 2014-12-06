@@ -173,4 +173,4 @@ newRenderer window = do
             FullSheet -> drawFullSheet pos scl rot
             Reaper d  -> drawReaper d pos scl rot
             Text str  -> drawText str pos scl rot
-            Box w h   -> drawBox pos (V2 w h * scl) rot
+            Box hw hh -> drawBox pos (V2 (2*hw) (2*hh) * scl) rot

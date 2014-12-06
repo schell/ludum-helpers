@@ -10,7 +10,7 @@ data Displayable = CleanFrame
                  | Reaper CardinalDirection
                  | Text String
                  | Box Width Height
-                 deriving (Typeable)
+                 deriving (Typeable, Show)
 
 data CardinalDirection = North
                        | South
