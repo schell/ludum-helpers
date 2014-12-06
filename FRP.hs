@@ -59,3 +59,23 @@ getKey :: [InputEvent] -> Maybe InputEvent
 getKey [] = Nothing
 getKey (k@(KeyEvent _ _ _ _):_) = Just k
 getKey (_:ks) = getKey ks
+
+-- Progress the signals
+--let stepVaryingComponent mf = do vars <- get
+--                                 let runM y = mf $ stepYarn y dt ()
+--                                     outs   = runM <$> vars
+--                                     vals   = outVal  <$> outs
+--                                     vars'  = outYarn <$> outs
+--                                 -- Update the signals
+--                                 put vars'
+--                                 -- Return the static values
+--                                 return vals
+
+-- Progress varying positions
+--(pvals :: Component Position) <- stepVaryingComponent (flip R.runReader input)
+-- Update static positions
+--modify $ IM.union pvals
+
+---- Update static positions
+--modify $ IM.union pos'
+

@@ -9,6 +9,7 @@ data Displayable = CleanFrame
                  | FullSheet
                  | Reaper CardinalDirection
                  | Text String
+                 | Box Width Height
                  deriving (Typeable)
 
 data CardinalDirection = North

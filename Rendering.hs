@@ -87,7 +87,8 @@ renderText render str pos scl rot = renderText' str pos
 
 newSpriteRenderer :: ShaderProgram -> SpriteSheet -> V2 Int -> Int -> Int -> IO RenderSprite
 newSpriteRenderer s ss p w h = do
-    let ps = fmap (fmap fromIntegral) [V2 0 0, V2 w 0, V2 w h, V2 0 h] :: [V2 Float]
+    let (hw, hh) = ((fromIntegral w)/2, (fromIntegral h)/2)
+        ps = [V2 (-hw) (-hh), V2 hw (-hh), V2 hw hh, V2 (-hw) hh] :: [V2 Float]
         [ssw,ssh] = fmap fromIntegral [ssWidth ss, ssHeight ss]
         [w',h'] = fmap fromIntegral [w, h]
         -- Origin of the rectangle in u,v coords.
@@ -100,8 +101,8 @@ newSpriteRenderer s ss p w h = do
 
     return $ \vp vs r -> usingShader s $ withTextures2D [t] $ withVBOs s [vbov,vbot] $ do
         let mv = mkM44 $ do translate $ embed vp
-                            scale $ embedWith vs 1
                             rotate r (V3 0 0 1)
+                            scale $ embedWith vs 1
         updateUniform s $ uniformi "sampler" (0 :: Int)
         updateUniform s $ uniformM4f "modelview" (mv :: M44 Float)
         drawArrays TriangleFan 0 4
@@ -119,6 +120,22 @@ newReaperRenderer s ss = do
                                    West  -> west pos scl rot
                                    North -> north pos scl rot
 
+newBoxRenderer :: ShaderProgram -> IO RenderSprite
+newBoxRenderer s = do
+    let ps = [V2 (-0.5) (-0.5), V2 0.5 (-0.5), V2 0.5 0.5, V2 (-0.5) 0.5]
+        ts = [V2 0 0, V2 1 0, V2 1 1, V2 0 1]
+
+    vbo <- bufferVBO s (position2 ps)
+    tvbo <- bufferVBO s (texcoord ts)
+
+    return $ \vp vs r -> usingShader s $ withVBOs s [vbo, tvbo] $ do
+        let mv = mkM44 $ do translate $ embed vp
+                            rotate r (V3 0 0 1)
+                            scale $ embedWith vs 1
+        updateUniform s $ uniformi "sampler" (0 :: Int)
+        updateUniform s $ uniformM4f "modelview" (mv :: M44 Float)
+        drawArrays TriangleFan 0 4
+
 newRenderer :: Window -> IO Renderer
 newRenderer window = do
     --s  <- simple2dTextureShader
@@ -128,6 +145,7 @@ newRenderer window = do
     drawFullSheet <- newSpriteRenderer s ss (V2 0 0) 304 1184
     drawReaper    <- newReaperRenderer s ss
     drawText      <- newTextRenderer s ss
+    drawBox       <- newBoxRenderer s
 
     currentProgram $= (Just $ program s)
     clearColor $= toColor4 (black :: V4 Float)
@@ -155,3 +173,4 @@ newRenderer window = do
             FullSheet -> drawFullSheet pos scl rot
             Reaper d  -> drawReaper d pos scl rot
             Text str  -> drawText str pos scl rot
+            Box w h   -> drawBox pos (V2 w h * scl) rot

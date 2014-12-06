@@ -9,28 +9,36 @@ import Graphics.UI.GLFW (Key(..))
 import qualified Data.Set as S
 
 type Time = Float
-type KeyMap a = [(a, Direction)]
-type PlayerControl a = (S.Set a -> Time -> Velocity)
+type DirectionMap a = [(a, Direction)]
+type RotationMap a = [(a, Rotation)]
+type PlayerDirection a = (S.Set a -> Time -> Velocity)
+type PlayerRotation a = (S.Set a -> Time -> Rotation)
 data AIControl = AIControl deriving (Show, Typeable)
 
-wasdKeyMap :: KeyMap Key
-wasdKeyMap = [ (Key'W, Up)
-             , (Key'A, Left')
-             , (Key'S, Down)
-             , (Key'D, Right')
-             ]
+wasdDirectionMap :: DirectionMap Key
+wasdDirectionMap =
+    [ (Key'W, Up)
+    , (Key'A, Left')
+    , (Key'S, Down)
+    , (Key'D, Right')
+    ]
 
-dpadKeyMap :: KeyMap Int
-dpadKeyMap = [ (12, Up)
-             , (15, Left')
-             , (14, Down)
-             , (13, Right')
-             ]
+dpadDirectionMap :: DirectionMap Int
+dpadDirectionMap =
+    [ (12, Up)
+    , (15, Left')
+    , (14, Down)
+    , (13, Right')
+    ]
 
+bumperRotationMap :: RotationMap Int
+bumperRotationMap =
+    [ (4, -1)
+    , (5, 1)
+    ]
 
-
-playerControl :: Eq a => KeyMap a -> PlayerControl a
-playerControl keyMap keys t = t *^ v
+playerDirection :: Eq a => DirectionMap a -> PlayerDirection a
+playerDirection keyMap keys t = t *^ v
     where v = (100 *^) $ sum $ map toV directions
           directions = catMaybes $ S.toList $ S.map (`lookup` keyMap) keys
           toV Left'  = V2 (-1) 0
@@ -38,3 +46,9 @@ playerControl keyMap keys t = t *^ v
           toV Up     = V2 0    (-1)
           toV Down   = V2 0    1
           toV None   = zero
+
+playerRotation :: Eq a => RotationMap a -> PlayerRotation a
+playerRotation keyMap keys t = t * r
+    where r = sum rotations
+          rotations = catMaybes $ S.toList $ S.map (`lookup` keyMap) keys
+
